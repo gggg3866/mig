@@ -190,6 +190,93 @@ Agent registration process
 
 Agent upgrade process
 ---------------------
+MIG supports upgrading agents in the wild. The upgrade protocol is designed with
+security in mind. The flow diagram below presents a high-level view:
+
+ ::
+
+	Investigator          Scheduler             Agent             NewAgent           FileServer
+	+-----------+         +-------+             +---+             +------+           +--------+
+		  |                   |                   |                   |                   |
+		  |    1.initiate     |                   |                   |                   |
+		  |------------------>|                   |                   |                   |
+		  |                   |  2.send command   |                   |                   |
+		  |                   |------------------>| 3.verify          |                   |
+		  |                   |                   |--------+          |                   |
+		  |                   |                   |        |          |                   |
+		  |                   |                   |        |          |                   |
+		  |                   |                   |<-------+          |                   |
+		  |                   |                   |                   |                   |
+		  |                   |                   |    4.download     |                   |
+		  |                   |                   |-------------------------------------->|
+		  |                   |                   |                   |                   |
+		  |                   |                   | 5.checksum        |                   |
+		  |                   |                   |--------+          |                   |
+		  |                   |                   |        |          |                   |
+		  |                   |                   |        |          |                   |
+		  |                   |                   |<-------+          |                   |
+		  |                   |                   |                   |                   |
+		  |                   |                   |      6.exec       |                   |
+		  |                   |                   |------------------>|                   |
+		  |                   |                   |                   |                   |
+		  |                   |    7.register     |                   |                   |
+		  |                   |<--------------------------------------|                   |
+		  |                   |                   |                   |                   |
+		  |                   |    8.terminate    |                   |                   |
+		  |                   |------------------>|                   |                   |
+		  |                   |                   |                   |                   |
+		  |                   |   9.acknowledge   |                   |                   |
+		  |                   |<------------------|                   |                   |
+		  |                   |                   |                   |                   |
+		  |                   |     10.check      |                   |                   |
+		  |                   |-------------------------------------->|                   |
+		  |                   |                   |                   |                   |
+		  |                   |    11.results     |                   |                   |
+		  |                   |<--------------------------------------|                   |
+		  |                   |                   |                   |                   |
+		  |                   |    12.cleanup     |                   |                   |
+		  |                   |-------------------------------------->|                   |
+		  |                   |                   |                   |                   |
+		  |                   |  13.acknowledge   |                   |                   |
+		  |                   |<--------------------------------------|                   |
+
+All upgrade operations are initiated by an investigator (1). The upgrade
+by an action that calls the upgrade module with the following parameters:
+
+.. code:: json
+
+	{
+		"to_version": "b9536d2-201403031435",
+		"location":	"https://download.mig.example.net/mig-agent-b9536d2-201403031435",
+		"checksum": "c59d4eaeac728671c635ff645014e2afa935bebffdb5fbd207ffdeab"
+	}
+
+* to_version is the version an agent should upgrade to
+* location points to a HTTPS address that contains the agent binary
+* checksum is a hash of the agent binary, that will be verified after download
+
+The parameters above are signed using a standard PGP action signature.
+
+The upgrade action is forwarded to agents (2) like any other action. The action
+signature is verified by the agent (3), and the upgrade module is called. The
+module downloads the new binary (4), and verifies the version and checksum (5).
+
+Assuming everything checks in, the agent execute the binary of the new agent (6).
+At that point, two agents are running on the same machine, and the rest of the
+protocol is designed to shut down the old agent, and clean up.
+
+The freshly started agent starts by, like all agents, registering with the
+scheduler (7). This tells the schedule that two agents are running on the same
+node, and one of them must terminate. The scheduler sends a terminate order (8)
+to the agent with the oldest version number. The old agent acknowledge and shuts
+down (9). On reception of the acknowledgement, the scheduler sends an action for
+the new agent to check for the PID of the old agent (10). If no PID is found in
+the results (11), the scheduler tells the new agent to remove the binary of the
+old agent (12). When the agent acknowledge (13), the upgrade protocol is done.
+
+If the PID of the old agent lingers on the system, an error is logged for the
+investigator to decide what to do next. The scheduler does not attempt to clean
+up the situation.
 
 Agent command execution flow
 ----------------------------
